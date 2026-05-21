@@ -4,6 +4,7 @@ Thumbs.db
 
 **/.idea/
 **/.gradle/
+**/.git-backup/
 **/build/
 **/dist/
 **/node_modules/
