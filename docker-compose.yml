@@ -1,0 +1,110 @@
+services:
+  frontend:
+    build:
+      context: ./expensetracker-frontend
+      dockerfile: Dockerfile
+    container_name: expense-tracker-frontend
+    depends_on:
+      kong:
+        condition: service_started
+    ports:
+      - "3000:80"
+    networks:
+      - expense-tracker-network
+
+  api:
+    build:
+      context: ./expensetracker-backend
+      dockerfile: Dockerfile
+    container_name: expense-tracker-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/expense_tracker
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+    networks:
+      - expense-tracker-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  kong:
+    image: kong:3.6
+    container_name: expense-tracker-kong
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    networks:
+      - expense-tracker-network
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: expense-tracker-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: expense_tracker
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - expense-tracker-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d expense_tracker"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: expense-tracker-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - expense-tracker-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    external: true
+    name: expensetracker-backend_postgres_data
+  redis_data:
+    external: true
+    name: expensetracker-backend_redis_data
+
+networks:
+  expense-tracker-network:
+    driver: bridge
